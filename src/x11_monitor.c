@@ -116,7 +116,7 @@ void _glfwPollMonitorsX11(void)
         disconnectedCount = _glfw.monitorCount;
         if (disconnectedCount)
         {
-            disconnected = _glfw_calloc(_glfw.monitorCount, sizeof(_GLFWmonitor*));
+            disconnected = calloc(_glfw.monitorCount, sizeof(_GLFWmonitor*));
             memcpy(disconnected,
                    _glfw.monitors,
                    _glfw.monitorCount * sizeof(_GLFWmonitor*));
@@ -164,7 +164,7 @@ void _glfwPollMonitorsX11(void)
             if (widthMM <= 0 || heightMM <= 0)
             {
                 // HACK: If RandR does not provide a physical size, assume the
-                //       X11 default 96 DPI and calculate from the CRTC viewport
+                //       X11 default 96 DPI and calcuate from the CRTC viewport
                 // NOTE: These members are affected by rotation, unlike the mode
                 //       info and output info members
                 widthMM  = (int) (ci->width * 25.4f / 96.f);
@@ -209,7 +209,7 @@ void _glfwPollMonitorsX11(void)
                 _glfwInputMonitor(disconnected[i], GLFW_DISCONNECTED, 0);
         }
 
-        _glfw_free(disconnected);
+        free(disconnected);
     }
     else
     {
@@ -450,7 +450,7 @@ GLFWvidmode* _glfwPlatformGetVideoModes(_GLFWmonitor* monitor, int* count)
         XRRCrtcInfo* ci = XRRGetCrtcInfo(_glfw.x11.display, sr, monitor->x11.crtc);
         XRROutputInfo* oi = XRRGetOutputInfo(_glfw.x11.display, sr, monitor->x11.output);
 
-        result = _glfw_calloc(oi->nmode, sizeof(GLFWvidmode));
+        result = calloc(oi->nmode, sizeof(GLFWvidmode));
 
         for (int i = 0;  i < oi->nmode;  i++)
         {
@@ -482,7 +482,7 @@ GLFWvidmode* _glfwPlatformGetVideoModes(_GLFWmonitor* monitor, int* count)
     else
     {
         *count = 1;
-        result = _glfw_calloc(1, sizeof(GLFWvidmode));
+        result = calloc(1, sizeof(GLFWvidmode));
         _glfwPlatformGetVideoMode(monitor, result);
     }
 

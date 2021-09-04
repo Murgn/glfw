@@ -30,6 +30,7 @@
 #include "internal.h"
 
 #include <stdlib.h>
+#include <malloc.h>
 
 static const GUID _glfw_GUID_DEVINTERFACE_HID =
     {0x4d1e55b2,0xf16f,0x11cf,{0x88,0xcb,0x00,0x11,0x11,0x00,0x00,0x30}};
@@ -37,10 +38,6 @@ static const GUID _glfw_GUID_DEVINTERFACE_HID =
 #define GUID_DEVINTERFACE_HID _glfw_GUID_DEVINTERFACE_HID
 
 #if defined(_GLFW_USE_HYBRID_HPG) || defined(_GLFW_USE_OPTIMUS_HPG)
-
-#if defined(_GLFW_BUILD_DLL)
- #pragma message("These symbols must be exported by the executable and have no effect in a DLL")
-#endif
 
 // Executables (but not DLLs) exporting this symbol with this value will be
 // automatically directed to the high-performance GPU on Nvidia Optimus systems
@@ -146,8 +143,6 @@ static GLFWbool loadLibraries(void)
             GetProcAddress(_glfw.win32.dwmapi.instance, "DwmFlush");
         _glfw.win32.dwmapi.EnableBlurBehindWindow = (PFN_DwmEnableBlurBehindWindow)
             GetProcAddress(_glfw.win32.dwmapi.instance, "DwmEnableBlurBehindWindow");
-        _glfw.win32.dwmapi.GetColorizationColor = (PFN_DwmGetColorizationColor)
-            GetProcAddress(_glfw.win32.dwmapi.instance, "DwmGetColorizationColor");
     }
 
     _glfw.win32.shcore.instance = LoadLibraryA("shcore.dll");
@@ -404,13 +399,13 @@ WCHAR* _glfwCreateWideStringFromUTF8Win32(const char* source)
         return NULL;
     }
 
-    target = _glfw_calloc(count, sizeof(WCHAR));
+    target = calloc(count, sizeof(WCHAR));
 
     if (!MultiByteToWideChar(CP_UTF8, 0, source, -1, target, count))
     {
         _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
                              "Win32: Failed to convert string from UTF-8");
-        _glfw_free(target);
+        free(target);
         return NULL;
     }
 
@@ -432,13 +427,13 @@ char* _glfwCreateUTF8FromWideStringWin32(const WCHAR* source)
         return NULL;
     }
 
-    target = _glfw_calloc(size, 1);
+    target = calloc(size, 1);
 
     if (!WideCharToMultiByte(CP_UTF8, 0, source, -1, target, size, NULL, NULL))
     {
         _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
                              "Win32: Failed to convert string to UTF-8");
-        _glfw_free(target);
+        free(target);
         return NULL;
     }
 
@@ -557,6 +552,14 @@ BOOL _glfwIsWindows10BuildOrGreaterWin32(WORD build)
 
 int _glfwPlatformInit(void)
 {
+    // To make SetForegroundWindow work as we want, we need to fiddle
+    // with the FOREGROUNDLOCKTIMEOUT system setting (we do this as early
+    // as possible in the hope of still being the foreground process)
+    SystemParametersInfoW(SPI_GETFOREGROUNDLOCKTIMEOUT, 0,
+                          &_glfw.win32.foregroundLockTimeout, 0);
+    SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, UIntToPtr(0),
+                          SPIF_SENDCHANGE);
+
     if (!loadLibraries())
         return GLFW_FALSE;
 
@@ -577,6 +580,7 @@ int _glfwPlatformInit(void)
         return GLFW_FALSE;
 
     _glfwInitTimerWin32();
+    _glfwInitJoysticksWin32();
 
     _glfwPollMonitorsWin32();
     return GLFW_TRUE;
@@ -592,11 +596,18 @@ void _glfwPlatformTerminate(void)
 
     _glfwUnregisterWindowClassWin32();
 
-    _glfw_free(_glfw.win32.clipboardString);
-    _glfw_free(_glfw.win32.rawInput);
+    // Restore previous foreground lock timeout system setting
+    SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0,
+                          UIntToPtr(_glfw.win32.foregroundLockTimeout),
+                          SPIF_SENDCHANGE);
+
+    free(_glfw.win32.clipboardString);
+    free(_glfw.win32.rawInput);
 
     _glfwTerminateWGL();
     _glfwTerminateEGL();
+
+    _glfwTerminateJoysticksWin32();
 
     freeLibraries();
 }
@@ -604,9 +615,7 @@ void _glfwPlatformTerminate(void)
 const char* _glfwPlatformGetVersionString(void)
 {
     return _GLFW_VERSION_NUMBER " Win32 WGL EGL OSMesa"
-#if defined(__MINGW64_VERSION_MAJOR)
-        " MinGW-w64"
-#elif defined(__MINGW32__)
+#if defined(__MINGW32__)
         " MinGW"
 #elif defined(_MSC_VER)
         " VisualC"

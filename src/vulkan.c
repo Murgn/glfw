@@ -108,7 +108,7 @@ GLFWbool _glfwInitVulkan(int mode)
         return GLFW_FALSE;
     }
 
-    ep = _glfw_calloc(count, sizeof(VkExtensionProperties));
+    ep = calloc(count, sizeof(VkExtensionProperties));
 
     err = vkEnumerateInstanceExtensionProperties(NULL, &count, ep);
     if (err)
@@ -117,7 +117,7 @@ GLFWbool _glfwInitVulkan(int mode)
                         "Vulkan: Failed to query instance extensions: %s",
                         _glfwGetVulkanResultString(err));
 
-        _glfw_free(ep);
+        free(ep);
         _glfwTerminateVulkan();
         return GLFW_FALSE;
     }
@@ -145,7 +145,7 @@ GLFWbool _glfwInitVulkan(int mode)
 #endif
     }
 
-    _glfw_free(ep);
+    free(ep);
 
     _glfw.vk.available = GLFW_TRUE;
 

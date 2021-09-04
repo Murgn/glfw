@@ -30,6 +30,7 @@
 #include "internal.h"
 
 #include <stdlib.h>
+#include <malloc.h>
 #include <assert.h>
 
 // Return the value corresponding to the specified attribute
@@ -129,7 +130,7 @@ static int choosePixelFormat(_GLFWwindow* window,
                                           NULL);
     }
 
-    usableConfigs = _glfw_calloc(nativeCount, sizeof(_GLFWfbconfig));
+    usableConfigs = calloc(nativeCount, sizeof(_GLFWfbconfig));
 
     for (i = 0;  i < nativeCount;  i++)
     {
@@ -148,7 +149,7 @@ static int choosePixelFormat(_GLFWwindow* window,
                 _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
                                     "WGL: Failed to retrieve pixel format attributes");
 
-                _glfw_free(usableConfigs);
+                free(usableConfigs);
                 return 0;
             }
 
@@ -162,9 +163,6 @@ static int choosePixelFormat(_GLFWwindow* window,
                 continue;
 
             if (findAttribValue(WGL_ACCELERATION_ARB) == WGL_NO_ACCELERATION_ARB)
-                continue;
-
-            if (findAttribValue(WGL_DOUBLE_BUFFER_ARB) != fbconfig->doublebuffer)
                 continue;
 
             u->redBits = findAttribValue(WGL_RED_BITS_ARB);
@@ -184,6 +182,8 @@ static int choosePixelFormat(_GLFWwindow* window,
 
             if (findAttribValue(WGL_STEREO_ARB))
                 u->stereo = GLFW_TRUE;
+            if (findAttribValue(WGL_DOUBLE_BUFFER_ARB))
+                u->doublebuffer = GLFW_TRUE;
 
             if (_glfw.wgl.ARB_multisample)
                 u->samples = findAttribValue(WGL_SAMPLES_ARB);
@@ -220,7 +220,7 @@ static int choosePixelFormat(_GLFWwindow* window,
                 _glfwInputErrorWin32(GLFW_PLATFORM_ERROR,
                                     "WGL: Failed to describe pixel format");
 
-                _glfw_free(usableConfigs);
+                free(usableConfigs);
                 return 0;
             }
 
@@ -237,9 +237,6 @@ static int choosePixelFormat(_GLFWwindow* window,
             }
 
             if (pfd.iPixelType != PFD_TYPE_RGBA)
-                continue;
-
-            if (!!(pfd.dwFlags & PFD_DOUBLEBUFFER) != fbconfig->doublebuffer)
                 continue;
 
             u->redBits = pfd.cRedBits;
@@ -259,6 +256,8 @@ static int choosePixelFormat(_GLFWwindow* window,
 
             if (pfd.dwFlags & PFD_STEREO)
                 u->stereo = GLFW_TRUE;
+            if (pfd.dwFlags & PFD_DOUBLEBUFFER)
+                u->doublebuffer = GLFW_TRUE;
         }
 
         u->handle = pixelFormat;
@@ -270,7 +269,7 @@ static int choosePixelFormat(_GLFWwindow* window,
         _glfwInputError(GLFW_API_UNAVAILABLE,
                         "WGL: The driver does not appear to support OpenGL");
 
-        _glfw_free(usableConfigs);
+        free(usableConfigs);
         return 0;
     }
 
@@ -280,12 +279,12 @@ static int choosePixelFormat(_GLFWwindow* window,
         _glfwInputError(GLFW_FORMAT_UNAVAILABLE,
                         "WGL: Failed to find a suitable pixel format");
 
-        _glfw_free(usableConfigs);
+        free(usableConfigs);
         return 0;
     }
 
     pixelFormat = (int) closest->handle;
-    _glfw_free(usableConfigs);
+    free(usableConfigs);
 
     return pixelFormat;
 }

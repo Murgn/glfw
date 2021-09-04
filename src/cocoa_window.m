@@ -243,7 +243,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
 
 - (void)windowDidResize:(NSNotification *)notification
 {
-    if (window->context.source == GLFW_NATIVE_CONTEXT_API)
+    if (window->context.client != GLFW_NO_API)
         [window->context.nsgl.object update];
 
     if (_glfw.ns.disabledCursorWindow == window)
@@ -278,7 +278,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
 
 - (void)windowDidMove:(NSNotification *)notification
 {
-    if (window->context.source == GLFW_NATIVE_CONTEXT_API)
+    if (window->context.client != GLFW_NO_API)
         [window->context.nsgl.object update];
 
     if (_glfw.ns.disabledCursorWindow == window)
@@ -320,14 +320,6 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
         _glfwPlatformIconifyWindow(window);
 
     _glfwInputWindowFocus(window, GLFW_FALSE);
-}
-
-- (void)windowDidChangeOcclusionState:(NSNotification* )notification
-{
-    if ([window->ns.object occlusionState] & NSWindowOcclusionStateVisible)
-        window->ns.occluded = GLFW_FALSE;
-    else
-        window->ns.occluded = GLFW_TRUE;
 }
 
 @end
@@ -397,7 +389,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
 
 - (void)updateLayer
 {
-    if (window->context.source == GLFW_NATIVE_CONTEXT_API)
+    if (window->context.client != GLFW_NO_API)
         [window->context.nsgl.object update];
 
     _glfwInputWindowDamage(window);
@@ -520,18 +512,6 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
 {
     const NSRect contentRect = [window->ns.view frame];
     const NSRect fbRect = [window->ns.view convertRectToBacking:contentRect];
-    const float xscale = fbRect.size.width / contentRect.size.width;
-    const float yscale = fbRect.size.height / contentRect.size.height;
-
-    if (xscale != window->ns.xscale || yscale != window->ns.yscale)
-    {
-        if (window->ns.retina && window->ns.layer)
-            [window->ns.layer setContentsScale:[window->ns.object backingScaleFactor]];
-
-        window->ns.xscale = xscale;
-        window->ns.yscale = yscale;
-        _glfwInputWindowContentScale(window, xscale, yscale);
-    }
 
     if (fbRect.size.width != window->ns.fbWidth ||
         fbRect.size.height != window->ns.fbHeight)
@@ -539,6 +519,19 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
         window->ns.fbWidth  = fbRect.size.width;
         window->ns.fbHeight = fbRect.size.height;
         _glfwInputFramebufferSize(window, fbRect.size.width, fbRect.size.height);
+    }
+
+    const float xscale = fbRect.size.width / contentRect.size.width;
+    const float yscale = fbRect.size.height / contentRect.size.height;
+
+    if (xscale != window->ns.xscale || yscale != window->ns.yscale)
+    {
+        window->ns.xscale = xscale;
+        window->ns.yscale = yscale;
+        _glfwInputWindowContentScale(window, xscale, yscale);
+
+        if (window->ns.retina && window->ns.layer)
+            [window->ns.layer setContentsScale:[window->ns.object backingScaleFactor]];
     }
 }
 
@@ -646,7 +639,7 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
     const NSUInteger count = [urls count];
     if (count)
     {
-        char** paths = _glfw_calloc(count, sizeof(char*));
+        char** paths = calloc(count, sizeof(char*));
 
         for (NSUInteger i = 0;  i < count;  i++)
             paths[i] = _glfw_strdup([urls[i] fileSystemRepresentation]);
@@ -654,8 +647,8 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
         _glfwInputDrop(window, (int) count, (const char**) paths);
 
         for (NSUInteger i = 0;  i < count;  i++)
-            _glfw_free(paths[i]);
-        _glfw_free(paths);
+            free(paths[i]);
+        free(paths);
     }
 
     return YES;
@@ -730,24 +723,14 @@ static const NSRange kEmptyRange = { NSNotFound, 0 };
     else
         characters = (NSString*) string;
 
-    NSRange range = NSMakeRange(0, [characters length]);
-    while (range.length)
+    const NSUInteger length = [characters length];
+    for (NSUInteger i = 0;  i < length;  i++)
     {
-        uint32_t codepoint = 0;
+        const unichar codepoint = [characters characterAtIndex:i];
+        if ((codepoint & 0xff00) == 0xf700)
+            continue;
 
-        if ([characters getBytes:&codepoint
-                       maxLength:sizeof(codepoint)
-                      usedLength:NULL
-                        encoding:NSUTF32StringEncoding
-                         options:0
-                           range:range
-                  remainingRange:&range])
-        {
-            if (codepoint >= 0xf700 && codepoint <= 0xf7ff)
-                continue;
-
-            _glfwInputChar(window, codepoint, mods, plain);
-        }
+        _glfwInputChar(window, codepoint, mods, plain);
     }
 }
 
@@ -915,11 +898,6 @@ int _glfwPlatformCreateWindow(_GLFWwindow* window,
         }
         else if (ctxconfig->source == GLFW_EGL_CONTEXT_API)
         {
-            // EGL implementation on macOS use CALayer* EGLNativeWindowType so we
-            // need to get the layer for EGL window surface creation.
-            [window->ns.view setWantsLayer:YES];
-            window->ns.layer = [window->ns.view layer];
-
             if (!_glfwInitEGL())
                 return GLFW_FALSE;
             if (!_glfwCreateContextEGL(window, ctxconfig, fbconfig))
@@ -991,8 +969,7 @@ void _glfwPlatformSetWindowTitle(_GLFWwindow* window, const char* title)
 void _glfwPlatformSetWindowIcon(_GLFWwindow* window,
                                 int count, const GLFWimage* images)
 {
-    _glfwInputError(GLFW_FEATURE_UNAVAILABLE,
-                    "Cocoa: Regular windows do not have icons on macOS");
+    // Regular windows do not have icons
 }
 
 void _glfwPlatformGetWindowPos(_GLFWwindow* window, int* xpos, int* ypos)
@@ -1370,13 +1347,6 @@ void _glfwPlatformSetWindowFloating(_GLFWwindow* window, GLFWbool enabled)
     } // autoreleasepool
 }
 
-void _glfwPlatformSetWindowMousePassthrough(_GLFWwindow* window, GLFWbool enabled)
-{
-    @autoreleasepool {
-    [window->ns.object setIgnoresMouseEvents:enabled];
-    }
-}
-
 float _glfwPlatformGetWindowOpacity(_GLFWwindow* window)
 {
     @autoreleasepool {
@@ -1393,8 +1363,6 @@ void _glfwPlatformSetWindowOpacity(_GLFWwindow* window, float opacity)
 
 void _glfwPlatformSetRawMouseMotion(_GLFWwindow *window, GLFWbool enabled)
 {
-    _glfwInputError(GLFW_FEATURE_UNIMPLEMENTED,
-                    "Cocoa: Raw mouse motion not yet implemented");
 }
 
 GLFWbool _glfwPlatformRawMouseMotionSupported(void)
@@ -1536,7 +1504,7 @@ const char* _glfwPlatformGetScancodeName(int scancode)
     if (scancode < 0 || scancode > 0xff ||
         _glfw.ns.keycodes[scancode] == GLFW_KEY_UNKNOWN)
     {
-        _glfwInputError(GLFW_INVALID_VALUE, "Invalid scancode %i", scancode);
+        _glfwInputError(GLFW_INVALID_VALUE, "Invalid scancode");
         return NULL;
     }
 
@@ -1634,21 +1602,14 @@ int _glfwPlatformCreateStandardCursor(_GLFWcursor* cursor, int shape)
     SEL cursorSelector = NULL;
 
     // HACK: Try to use a private message
-    switch (shape)
-    {
-        case GLFW_RESIZE_EW_CURSOR:
-            cursorSelector = NSSelectorFromString(@"_windowResizeEastWestCursor");
-            break;
-        case GLFW_RESIZE_NS_CURSOR:
-            cursorSelector = NSSelectorFromString(@"_windowResizeNorthSouthCursor");
-            break;
-        case GLFW_RESIZE_NWSE_CURSOR:
-            cursorSelector = NSSelectorFromString(@"_windowResizeNorthWestSouthEastCursor");
-            break;
-        case GLFW_RESIZE_NESW_CURSOR:
-            cursorSelector = NSSelectorFromString(@"_windowResizeNorthEastSouthWestCursor");
-            break;
-    }
+    if (shape == GLFW_RESIZE_EW_CURSOR)
+        cursorSelector = NSSelectorFromString(@"_windowResizeEastWestCursor");
+    else if (shape == GLFW_RESIZE_NS_CURSOR)
+        cursorSelector = NSSelectorFromString(@"_windowResizeNorthSouthCursor");
+    else if (shape == GLFW_RESIZE_NWSE_CURSOR)
+        cursorSelector = NSSelectorFromString(@"_windowResizeNorthWestSouthEastCursor");
+    else if (shape == GLFW_RESIZE_NESW_CURSOR)
+        cursorSelector = NSSelectorFromString(@"_windowResizeNorthEastSouthWestCursor");
 
     if (cursorSelector && [NSCursor respondsToSelector:cursorSelector])
     {
@@ -1659,33 +1620,22 @@ int _glfwPlatformCreateStandardCursor(_GLFWcursor* cursor, int shape)
 
     if (!cursor->ns.object)
     {
-        switch (shape)
-        {
-            case GLFW_ARROW_CURSOR:
-                cursor->ns.object = [NSCursor arrowCursor];
-                break;
-            case GLFW_IBEAM_CURSOR:
-                cursor->ns.object = [NSCursor IBeamCursor];
-                break;
-            case GLFW_CROSSHAIR_CURSOR:
-                cursor->ns.object = [NSCursor crosshairCursor];
-                break;
-            case GLFW_POINTING_HAND_CURSOR:
-                cursor->ns.object = [NSCursor pointingHandCursor];
-                break;
-            case GLFW_RESIZE_EW_CURSOR:
-                cursor->ns.object = [NSCursor resizeLeftRightCursor];
-                break;
-            case GLFW_RESIZE_NS_CURSOR:
-                cursor->ns.object = [NSCursor resizeUpDownCursor];
-                break;
-            case GLFW_RESIZE_ALL_CURSOR:
-                cursor->ns.object = [NSCursor closedHandCursor];
-                break;
-            case GLFW_NOT_ALLOWED_CURSOR:
-                cursor->ns.object = [NSCursor operationNotAllowedCursor];
-                break;
-        }
+        if (shape == GLFW_ARROW_CURSOR)
+            cursor->ns.object = [NSCursor arrowCursor];
+        else if (shape == GLFW_IBEAM_CURSOR)
+            cursor->ns.object = [NSCursor IBeamCursor];
+        else if (shape == GLFW_CROSSHAIR_CURSOR)
+            cursor->ns.object = [NSCursor crosshairCursor];
+        else if (shape == GLFW_POINTING_HAND_CURSOR)
+            cursor->ns.object = [NSCursor pointingHandCursor];
+        else if (shape == GLFW_RESIZE_EW_CURSOR)
+            cursor->ns.object = [NSCursor resizeLeftRightCursor];
+        else if (shape == GLFW_RESIZE_NS_CURSOR)
+            cursor->ns.object = [NSCursor resizeUpDownCursor];
+        else if (shape == GLFW_RESIZE_ALL_CURSOR)
+            cursor->ns.object = [NSCursor closedHandCursor];
+        else if (shape == GLFW_NOT_ALLOWED_CURSOR)
+            cursor->ns.object = [NSCursor operationNotAllowedCursor];
     }
 
     if (!cursor->ns.object)
@@ -1747,53 +1697,12 @@ const char* _glfwPlatformGetClipboardString(void)
         return NULL;
     }
 
-    _glfw_free(_glfw.ns.clipboardString);
+    free(_glfw.ns.clipboardString);
     _glfw.ns.clipboardString = _glfw_strdup([object UTF8String]);
 
     return _glfw.ns.clipboardString;
 
     } // autoreleasepool
-}
-
-EGLenum _glfwPlatformGetEGLPlatform(EGLint** attribs)
-{
-    if (_glfw.egl.ANGLE_platform_angle)
-    {
-        int type = 0;
-
-        if (_glfw.egl.ANGLE_platform_angle_opengl)
-        {
-            if (_glfw.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_OPENGL)
-                type = EGL_PLATFORM_ANGLE_TYPE_OPENGL_ANGLE;
-        }
-
-        if (_glfw.egl.ANGLE_platform_angle_metal)
-        {
-            if (_glfw.hints.init.angleType == GLFW_ANGLE_PLATFORM_TYPE_METAL)
-                type = EGL_PLATFORM_ANGLE_TYPE_METAL_ANGLE;
-        }
-
-        if (type)
-        {
-            *attribs = _glfw_calloc(3, sizeof(EGLint));
-            (*attribs)[0] = EGL_PLATFORM_ANGLE_TYPE_ANGLE;
-            (*attribs)[1] = type;
-            (*attribs)[2] = EGL_NONE;
-            return EGL_PLATFORM_ANGLE_ANGLE;
-        }
-    }
-
-    return 0;
-}
-
-EGLNativeDisplayType _glfwPlatformGetEGLNativeDisplay(void)
-{
-    return EGL_DEFAULT_DISPLAY;
-}
-
-EGLNativeWindowType _glfwPlatformGetEGLNativeWindow(_GLFWwindow* window)
-{
-    return window->ns.layer;
 }
 
 void _glfwPlatformGetRequiredInstanceExtensions(char** extensions)
